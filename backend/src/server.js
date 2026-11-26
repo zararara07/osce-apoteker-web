@@ -17,8 +17,22 @@ const PORT = process.env.PORT || 4000;
 const FAST_TIMER = process.env.FAST_TIMER === "true";
 
 // ============================================================================
-// 1. HEALTH CHECK (HARI 1 — TES KONEKSI BERSAMA)
+// 1. ROOT & HEALTH CHECK (HARI 1 — TES KONEKSI BERSAMA)
 // ============================================================================
+app.get("/", (req, res) => {
+  res.json({
+    message: "OSCE Apoteker UKMPPAI Backend berjalan normal!",
+    endpoints: {
+      health: "GET /api/health",
+      stationBundle: "GET /api/attempts/1/station/3/bundle",
+      restStation: "GET /api/attempts/1/station/5/bundle",
+      godotEvent: "POST /api/submissions/1/events",
+      npcTalk: "POST /api/submissions/1/npc-talk",
+    },
+    frontendUrl: "http://localhost:5173",
+  });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
