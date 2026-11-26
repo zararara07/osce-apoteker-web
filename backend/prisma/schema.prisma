@@ -1,0 +1,321 @@
+// ============================================================================
+// SKEMA DATABASE DATA-DRIVEN — OSCE SIMULATOR 3D UKMPPAI
+// Penanggung Jawab Utama: GILANG (Database Engineer)
+// Acuan: Brief Ilustrasi 3D OSCE Simulator UKMPPAI v2 (Lampiran A - F)
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- ENUMS (KONTRAK DENGAN TIM 3D GODOT & BACKEND) ----------
+
+enum UserRole {
+  STUDENT
+  LECTURER
+  ADMIN
+}
+
+enum PracticeArea {
+  PEMBUATAN
+  DISTRIBUSI
+  PELAYANAN
+  ISTIRAHAT
+}
+
+enum DrugClass {
+  BEBAS
+  BEBAS_TERBATAS
+  OWA
+  KERAS
+  NARKOTIKA
+  PSIKOTROPIKA
+  SITOSTATIKA
+  HERBAL_ALKES
+}
+
+// 6 Variasi Kondisi Visual Obat (Lampiran B)
+enum VisualCondition {
+  GOOD
+  DAMAGED
+  LEAKING
+  EXPIRED
+  BROKEN_SEAL
+  PRECIPITATE
+}
+
+// 6 Kompetensi UKAI OSCE (Halaman 2)
+enum UkaiCompetency {
+  PENGUMPULAN_DATA
+  PENETAPAN_MASALAH
+  PENYELESAIAN_MASALAH
+  PENCATATAN_PELAPORAN
+  KOMUNIKASI_EFEKTIF
+  SIKAP_PROFESIONAL
+}
+
+enum TimerPhase {
+  READ
+  WORK
+  MOVE
+  FINISHED
+}
+
+enum AccStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REVISION
+}
+
+// ---------- 1. USERS & GAMIFIKASI ----------
+
+model User {
+  id           Int           @id @default(autoincrement())
+  nimOrNip     String        @unique
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         UserRole      @default(STUDENT)
+  avatarId     String?       @default("apoteker_default")
+  totalXp      Int           @default(0)
+  level        Int           @default(1)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  attempts     ExamAttempt[]
+  badges       UserBadge[]
+}
+
+model Badge {
+  id          Int         @id @default(autoincrement())
+  code        String      @unique // contoh: ZERO_DRP, KOMUNIKATOR_ANDAL, ASEPTIS_PRO
+  name        String
+  description String
+  iconUrl     String?
+  xpBonus     Int         @default(50)
+
+  users       UserBadge[]
+}
+
+model UserBadge {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  badgeId    Int
+  unlockedAt DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badge      Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeId])
+}
+
+// ---------- 2. 10 TEMPLATE RUANGAN & BANK OBAT (LAMPIRAN A & B) ----------
+
+model Template {
+  id            Int           @id @default(autoincrement())
+  code          String        @unique // T1 .. T10
+  name          String
+  area          PracticeArea
+  scenePath     String        // path scene di Godot, misal: res://scenes/T5_gudang.tscn
+  isRestRoom    Boolean       @default(false) // true hanya untuk T10
+  defaultHasMic Boolean       @default(false) // true untuk T6, T7, T9
+
+  stationCases  StationCase[]
+}
+
+model DrugBank {
+  id          Int           @id @default(autoincrement())
+  categoryNo  Int           // 1 s.d. 35 sesuai Lampiran A
+  category    String
+  genericName String
+  brandName   String?       // contoh: Sanmol, Ventolin, Topamax, Microlax
+  dosageForm  String        // tablet, sirup kering, inhaler MDI, vial injeksi, dll.
+  strength    String?
+  drugClass   DrugClass
+  isLasa      Boolean       @default(false)
+  isHighAlert Boolean       @default(false)
+  storageRule String?
+  model3dKey  String        // kunci model 3D di Lampiran B (misal: syrup_bottle, inhaler_mdi)
+
+  stationItems StationItem[]
+}
+
+// ---------- 3. BANK REFERENSI (LAMPIRAN D) ----------
+
+model ReferenceBook {
+  id             Int             @id @default(autoincrement())
+  code           String          @unique // ISO, MIMS, DIPIRO, STOCKLEY, FI_V, PMK_3_2015, dll.
+  title          String
+  category       String
+  contentJson    Json            // ringkasan searchable untuk panel referensi web
+
+  caseReferences CaseReference[]
+}
+
+// ---------- 4. PEMETAAN DAY 1 - DAY 3 & STATION CASES (LAMPIRAN F) ----------
+
+model ExamDay {
+  id           Int           @id @default(autoincrement())
+  dayNumber    Int           @unique // 1, 2, 3
+  title        String        // "Paket Ujian Day 1"
+  isActive     Boolean       @default(true)
+
+  stationCases StationCase[]
+  attempts     ExamAttempt[]
+}
+
+model StationCase {
+  id                  Int                 @id @default(autoincrement())
+  examDayId           Int
+  stationNumber       Int                 // 1 s.d. 10 (5 = Istirahat -> T10)
+  templateId          Int
+  title               String
+  doorInstructionText String              @db.Text
+  hasMicrophone       Boolean             @default(false)
+  requiresAccStage    Boolean             @default(false) // true untuk T1 Studi Stabilitas
+  readSeconds         Int                 @default(60)
+  workSeconds         Int                 @default(540)
+  moveSeconds         Int                 @default(60)
+  // Data dinamis: profil pasien, kurva HPLC/spektro, daftar PBF, form aktif (Lampiran C)
+  caseDataJson        Json
+
+  examDay             ExamDay             @relation(fields: [examDayId], references: [id], onDelete: Cascade)
+  template            Template            @relation(fields: [templateId], references: [id])
+  items               StationItem[]
+  allowedReferences   CaseReference[]
+  npcDialogs          NpcDialogNode[]
+  rubricCriteria      RubricCriterion[]
+  submissions         StationSubmission[]
+
+  @@unique([examDayId, stationNumber])
+}
+
+model StationItem {
+  id              Int             @id @default(autoincrement())
+  stationCaseId   Int
+  drugBankId      Int
+  slotId          String          // posisi slot di ruangan Godot, misal: shelf_A1
+  visualCondition VisualCondition @default(GOOD)
+  batchNo         String?
+  expDate         String?
+  customLabelJson Json?           // override teks label dinamis per soal
+  isDistractor    Boolean         @default(false) // pengecoh (misal obat keras di T6)
+
+  stationCase     StationCase     @relation(fields: [stationCaseId], references: [id], onDelete: Cascade)
+  drugBank        DrugBank        @relation(fields: [drugBankId], references: [id])
+}
+
+model CaseReference {
+  id              Int           @id @default(autoincrement())
+  stationCaseId   Int
+  referenceBookId Int
+
+  stationCase     StationCase   @relation(fields: [stationCaseId], references: [id], onDelete: Cascade)
+  referenceBook   ReferenceBook @relation(fields: [referenceBookId], references: [id], onDelete: Cascade)
+
+  @@unique([stationCaseId, referenceBookId])
+}
+
+// ---------- 5. DIALOG BERCABANG NPC & RUBRIK 6 KOMPETENSI ----------
+
+model NpcDialogNode {
+  id              Int         @id @default(autoincrement())
+  stationCaseId   Int
+  npcRole         String      // PASIEN, DPJP, SAKSI_BPOM, PENGUJI
+  triggerKeywords String[]    // kata kunci pertanyaan peserta (misal: ["alergi", "gatal"])
+  isHiddenClue    Boolean     @default(false) // true = baru muncul jika ditanya!
+  clueKey         String?     // misal: CLUE_ALERGIE, CLUE_HAMIL
+  responseText    String      @db.Text
+  audioUrl        String?
+  npcAnim         String      @default("TALK_LIPSYNC")
+  rubricCode      String?
+
+  stationCase     StationCase @relation(fields: [stationCaseId], references: [id], onDelete: Cascade)
+}
+
+model RubricCriterion {
+  id               Int            @id @default(autoincrement())
+  stationCaseId    Int
+  code             String         // misal: WASH_HANDS, UNLOCK_CLUE_HAMIL, CALC_ROP_OK
+  competency       UkaiCompetency
+  description      String
+  maxScore         Int            @default(10)
+  xpReward         Int            @default(20)
+
+  stationCase      StationCase    @relation(fields: [stationCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([stationCaseId, code])
+}
+
+// ---------- 6. EKSEKUSI UJIAN, LOG 3D & TRANSKRIP MIKROFON ----------
+
+model ExamAttempt {
+  id             Int                 @id @default(autoincrement())
+  userId         Int
+  examDayId      Int
+  currentStation Int                 @default(1)
+  currentPhase   TimerPhase          @default(READ)
+  phaseEndsAt    DateTime?
+  totalScore     Float               @default(0)
+  earnedXp       Int                 @default(0)
+  startedAt      DateTime            @default(now())
+  finishedAt     DateTime?
+
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  examDay        ExamDay             @relation(fields: [examDayId], references: [id])
+  submissions    StationSubmission[]
+
+  @@index([userId])
+}
+
+model StationSubmission {
+  id               Int               @id @default(autoincrement())
+  attemptId        Int
+  stationCaseId    Int
+  formAnswersJson  Json?             // menyimpan jawaban 23 jenis form Lampiran C
+  accStatus        AccStatus         @default(NOT_REQUIRED) // untuk T1 Studi Stabilitas
+  unlockedClues    String[]          @default([])
+  scoreBreakdown   Json?             // skor per 6 kompetensi UKAI
+  stationScore     Float             @default(0)
+  submittedAt      DateTime?
+
+  attempt          ExamAttempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  stationCase      StationCase       @relation(fields: [stationCaseId], references: [id])
+  actionLogs       ActionLog[]
+  audioTranscripts AudioTranscript[]
+
+  @@unique([attemptId, stationCaseId])
+  @@index([attemptId])
+}
+
+model ActionLog {
+  id           Int               @id @default(autoincrement())
+  submissionId Int
+  eventCode    String            // WASH_HANDS, WEAR_APD, SORT_WASTE, OPEN_REFERENCE
+  payloadJson  Json?
+  createdAt    DateTime          @default(now())
+
+  submission   StationSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+}
+
+model AudioTranscript {
+  id            Int               @id @default(autoincrement())
+  submissionId  Int
+  spokenText    String            @db.Text
+  matchedClue   String?
+  npcReplyText  String            @db.Text
+  audioFileUrl  String?
+  createdAt     DateTime          @default(now())
+
+  submission    StationSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+}
